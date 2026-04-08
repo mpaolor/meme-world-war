@@ -28,7 +28,7 @@ export interface Member {
   cyberLockedTurns: number;
   isIronDomeActive: boolean;
   ironDomeBattery: number;
-  mood: 'default' | 'happy' | 'angry' | 'dead';
+  mood: 'default' | 'happy' | 'sad' | 'dead';
   moodTimer: number;
   weapons: Weapon[];
 }

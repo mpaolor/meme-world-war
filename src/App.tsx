@@ -80,9 +80,6 @@ export default function App() {
     e.isCharging = false;
     e.charge = 0;
     
-    const totalTeams = teamsRef.current.length;
-    
-    // 1. Check for Victory: How many teams still have living members?
     const aliveTeams = teamsRef.current.filter(t => t.members.some((m: Member) => m.hp > 0));
     
     if (aliveTeams.length <= 1) {
@@ -91,7 +88,7 @@ export default function App() {
       return;
     }
 
-    // 2. Standard Turn Rotation
+    const totalTeams = teamsRef.current.length;
     let found = false;
     teamMemberCounters.current[activeTeamIdx] = (teamMemberCounters.current[activeTeamIdx] + 1) % teamsRef.current[activeTeamIdx].members.length;
 
@@ -175,30 +172,16 @@ export default function App() {
         return;
       }
 
-      let targetX = e.scrollX;
-      if (e.projectiles.length > 0) {
-        targetX = e.projectiles[0].x - window.innerWidth / 2;
-        isManualScroll.current = false;
-        e.lastImpactPos = { x: e.projectiles[0].x };
-      } else if (e.explosions.length > 0 && e.lastImpactPos) {
-        targetX = e.lastImpactPos.x - window.innerWidth / 2;
-      } else if (activeM) {
-        const left = keys.current['ArrowLeft'];
-        const right = keys.current['ArrowRight'];
-        if (left || right) {
-          isManualScroll.current = true;
-          scrollVelocity.current = Math.min(scrollVelocity.current + 1.5, 40);
-          e.scrollX += right ? scrollVelocity.current : -scrollVelocity.current;
-          targetX = e.scrollX;
-        } else if (!isManualScroll.current) {
-          targetX = activeM.x - window.innerWidth / 2;
-        }
-      }
-      e.scrollX += (targetX - e.scrollX) * (e.projectiles.length > 0 ? 0.15 : 0.08);
-      e.scrollX = Math.max(0, Math.min(MAP_WIDTH - window.innerWidth, e.scrollX));
-
+      // --- PHYSICS & MOOD UPDATES ---
       teams.forEach(t => t.members.forEach((mem: Member) => {
         if (mem.hp <= 0) return;
+
+        // Mood cooldown logic
+        if (mem.moodTimer > 0) {
+          mem.moodTimer--;
+          if (mem.moodTimer <= 0) mem.mood = 'default';
+        }
+
         mem.vy += 0.25; 
         mem.y += mem.vy;
         const groundY = terrainHeightMap.current[Math.floor(mem.x)] || WATER_LINE;
@@ -221,6 +204,30 @@ export default function App() {
         if (mem.y > WATER_LINE) mem.hp -= 1.0;
       }));
 
+      // --- CAMERA ---
+      let targetX = e.scrollX;
+      if (e.projectiles.length > 0) {
+        targetX = e.projectiles[0].x - window.innerWidth / 2;
+        isManualScroll.current = false;
+        e.lastImpactPos = { x: e.projectiles[0].x };
+      } else if (e.explosions.length > 0 && e.lastImpactPos) {
+        targetX = e.lastImpactPos.x - window.innerWidth / 2;
+      } else if (activeM) {
+        const left = keys.current['ArrowLeft'];
+        const right = keys.current['ArrowRight'];
+        if (left || right) {
+          isManualScroll.current = true;
+          scrollVelocity.current = Math.min(scrollVelocity.current + 1.5, 40);
+          e.scrollX += right ? scrollVelocity.current : -scrollVelocity.current;
+          targetX = e.scrollX;
+        } else if (!isManualScroll.current) {
+          targetX = activeM.x - window.innerWidth / 2;
+        }
+      }
+      e.scrollX += (targetX - e.scrollX) * (e.projectiles.length > 0 ? 0.15 : 0.08);
+      e.scrollX = Math.max(0, Math.min(MAP_WIDTH - window.innerWidth, e.scrollX));
+
+      // --- PROJECTILES ---
       e.projectiles.forEach((p, i) => {
         if (p.fuel > 0) {
             const speed = Math.hypot(p.vx, p.vy);
@@ -281,6 +288,11 @@ export default function App() {
       const e = engine.current;
       const team = teamsRef.current[activeTeamIdx];
       const wpn = team.teamAmmo[currentWpn];
+
+      // Set happy mood for firing
+      m.mood = 'happy';
+      m.moodTimer = 120; 
+
       const rad = e.angle * Math.PI / 180;
       const ratio = e.charge / 100;
       
@@ -301,13 +313,23 @@ export default function App() {
     const explode = (x: number, y: number, proj: Projectile) => {
       const e = engine.current;
       const effect = applySpecialImpacts(proj, teamsRef.current, e.floatingTexts);
+      
       teamsRef.current.forEach(t => t.members.forEach((mem: Member) => {
         if (mem.hp <= 0) return;
         const d = Math.hypot(mem.x - x, mem.y - (mem.y - mem.radius/2));
         if (d < effect.radius + mem.radius) {
           const damageMult = 1 - (d / (effect.radius + mem.radius));
           const dmg = Math.max(0, Math.round(effect.damage * damageMult));
-          mem.hp -= dmg; mem.vy -= 4 * damageMult; 
+          
+          mem.hp -= dmg; 
+          mem.vy -= 4 * damageMult; 
+
+          // Set sad mood when hit
+          if (dmg > 5) {
+            mem.mood = 'sad';
+            mem.moodTimer = 180;
+          }
+
           if (dmg > 0) e.floatingTexts.push({ x: mem.x, y: mem.y - 40, text: `-${dmg}`, life: 60, color: '#ff4b4b' });
         }
       }));
