@@ -26,6 +26,7 @@ const WATER_LINE = 720;
 
 export default function App() {
   const [gameState, setGameState] = useState<'MENU' | 'LOADING' | 'PLAYING' | 'OVER'>('MENU');
+  const [winner, setWinner] = useState<string | null>(null);
   const [activeTeamIdx, setActiveTeamIdx] = useState(0);
   const [activeMemberIdx, setActiveMemberIdx] = useState(0);
   const [currentWpn, setCurrentWpn] = useState(0);
@@ -39,7 +40,7 @@ export default function App() {
   
   const keys = useKeyboard();
   const frameId = useRef<number>(0);
-  const teamsRef = useRef<any[]>([]); // Using any to allow the new teamAmmo structure
+  const teamsRef = useRef<any[]>([]); 
   const teamMemberCounters = useRef<number[]>([]);
   
   const engine = useRef({
@@ -76,11 +77,21 @@ export default function App() {
 
   const moveToNextPlayer = () => {
     const e = engine.current;
-    // CRITICAL: Reset charging and lock-states for next player
     e.isCharging = false;
     e.charge = 0;
     
     const totalTeams = teamsRef.current.length;
+    
+    // 1. Check for Victory: How many teams still have living members?
+    const aliveTeams = teamsRef.current.filter(t => t.members.some((m: Member) => m.hp > 0));
+    
+    if (aliveTeams.length <= 1) {
+      setWinner(aliveTeams.length === 1 ? aliveTeams[0].name : "No one (Mutual Annihilation)");
+      setGameState('OVER');
+      return;
+    }
+
+    // 2. Standard Turn Rotation
     let found = false;
     teamMemberCounters.current[activeTeamIdx] = (teamMemberCounters.current[activeTeamIdx] + 1) % teamsRef.current[activeTeamIdx].members.length;
 
@@ -111,6 +122,7 @@ export default function App() {
 
   const startConflict = (selectedNames: string[], size: 'Small' | 'Medium' | 'Large') => {
     setGameState('LOADING');
+    setWinner(null);
     const hMap: number[] = new Array(MAP_WIDTH).fill(WATER_LINE);
     let currentY = 450;
     for (let x = 0; x < MAP_WIDTH; x++) {
@@ -126,7 +138,6 @@ export default function App() {
       
       teamsRef.current = nats.map((n) => ({
         ...n,
-        // Shared Team Ammo
         teamAmmo: [
           { name: 'BAZOOKA', ammo: Infinity, type: 'standard' as WeaponType },
           { name: n.specials[0].replace('_', ' ').toUpperCase(), ammo: 1, type: n.specials[0] as WeaponType },
@@ -164,7 +175,6 @@ export default function App() {
         return;
       }
 
-      // --- CAMERA ---
       let targetX = e.scrollX;
       if (e.projectiles.length > 0) {
         targetX = e.projectiles[0].x - window.innerWidth / 2;
@@ -187,7 +197,6 @@ export default function App() {
       e.scrollX += (targetX - e.scrollX) * (e.projectiles.length > 0 ? 0.15 : 0.08);
       e.scrollX = Math.max(0, Math.min(MAP_WIDTH - window.innerWidth, e.scrollX));
 
-      // --- PHYSICS ---
       teams.forEach(t => t.members.forEach((mem: Member) => {
         if (mem.hp <= 0) return;
         mem.vy += 0.25; 
@@ -212,7 +221,6 @@ export default function App() {
         if (mem.y > WATER_LINE) mem.hp -= 1.0;
       }));
 
-      // --- PROJECTILES ---
       e.projectiles.forEach((p, i) => {
         if (p.fuel > 0) {
             const speed = Math.hypot(p.vx, p.vy);
@@ -244,12 +252,9 @@ export default function App() {
           moveToNextPlayer();
       }
 
-      // CONTROLS - Including fix for frozen aiming
       if (activeM && e.projectiles.length === 0 && e.explosions.length === 0 && activeM.hp > 0) {
         if (keys.current['ArrowUp']) e.angle -= 2;
         if (keys.current['ArrowDown']) e.angle += 2;
-        
-        // Cycle weapons from shared ammo pool
         const teamAmmo = teams[activeTeamIdx].teamAmmo;
         const trySelect = (idx: number) => { if (teamAmmo[idx]?.ammo > 0) setCurrentWpn(idx); };
         if (keys.current['Digit1']) trySelect(0);
@@ -276,7 +281,6 @@ export default function App() {
       const e = engine.current;
       const team = teamsRef.current[activeTeamIdx];
       const wpn = team.teamAmmo[currentWpn];
-      
       const rad = e.angle * Math.PI / 180;
       const ratio = e.charge / 100;
       
@@ -346,7 +350,6 @@ export default function App() {
         if (m.hp <= 0) return;
         const isActive = ti === activeTeamIdx && mi === activeMemberIdx;
         drawLeader(ctx, m, t.leader, t.color, isActive);
-        
         ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(m.x - 20, m.y - 55, 40, 5);
         ctx.fillStyle = m.hp > 50 ? '#22c55e' : (m.hp > 25 ? '#eab308' : '#ef4444');
         ctx.fillRect(m.x - 20, m.y - 55, (Math.max(0, m.hp)/100)*40, 5);
@@ -356,7 +359,6 @@ export default function App() {
           const rad = e.angle * Math.PI / 180;
           ctx.moveTo(m.x, m.y - m.radius - 10); ctx.lineTo(m.x + Math.cos(rad)*150, (m.y-m.radius-10) + Math.sin(rad)*150);
           ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
-          
           if (e.isCharging) { 
             ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(m.x - 30, m.y - 110, 60, 12);
             ctx.fillStyle = '#f97316'; ctx.fillRect(m.x - 30, m.y - 110, (e.charge/100)*60, 12); 
@@ -370,7 +372,7 @@ export default function App() {
       ctx.restore();
 
       const team = teamsRef.current[activeTeamIdx];
-      if (team) {
+      if (team && gameState === 'PLAYING') {
         ctx.fillStyle = 'rgba(15, 23, 42, 0.95)'; ctx.beginPath(); ctx.roundRect(20, 20, 260, 110, 8); ctx.fill();
         ctx.fillStyle = team.color; ctx.font = "bold 18px Courier New"; ctx.fillText(team.leader.toUpperCase(), 40, 45);
         team.teamAmmo.forEach((w: any, i: number) => {
@@ -385,10 +387,31 @@ export default function App() {
   }, [gameState, activeTeamIdx, activeMemberIdx, currentWpn]);
 
   if (gameState === 'MENU') return <MainMenu onStart={startConflict} />;
+  
   return (
-    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: '#000' }}>
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: '#000', position: 'relative' }}>
       <canvas ref={canvasRef} width={window.innerWidth} height={window.innerHeight} />
       <canvas ref={tCanvasRef} width={MAP_WIDTH} height={MAP_HEIGHT} style={{ display: 'none' }} />
+      
+      {gameState === 'OVER' && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+          background: 'rgba(0,0,0,0.8)', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', color: '#fff', zIndex: 100
+        }}>
+          <h1 style={{ fontSize: '4rem', marginBottom: '20px' }}>GAME OVER</h1>
+          <h2 style={{ fontSize: '2rem', color: '#fde047' }}>WINNER: {winner}</h2>
+          <button 
+            onClick={() => setGameState('MENU')}
+            style={{ 
+              marginTop: '30px', padding: '15px 40px', fontSize: '1.5rem', 
+              cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', borderRadius: '8px' 
+            }}
+          >
+            RETURN TO MENU
+          </button>
+        </div>
+      )}
     </div>
   );
 }
