@@ -1,6 +1,6 @@
 import type { Explosion, FloatingText, Interception, Member, Projectile, Team, WeaponType } from './types';
+import React, { useEffect, useRef, useState } from 'react';
 import { applySpecialImpacts, updateDrones } from './SpecialWeapons';
-import { useEffect, useRef, useState } from 'react';
 
 import { MainMenu } from './MainMenu';
 import { drawLeader } from './gameLogic';
@@ -54,7 +54,8 @@ export default function App() {
     waterOffset: 0,
     scrollX: 0,
     lastImpactPos: null as { x: number } | null,
-    isWaitingForExplosion: false
+    isWaitingForExplosion: false,
+    explosionPostTimer: 0 
   });
 
   const redrawTerrainCanvas = () => {
@@ -79,6 +80,7 @@ export default function App() {
     const e = engine.current;
     e.isCharging = false;
     e.charge = 0;
+    e.explosionPostTimer = 0;
     
     const aliveTeams = teamsRef.current.filter(t => t.members.some((m: Member) => m.hp > 0));
     
@@ -167,21 +169,17 @@ export default function App() {
       const teams = teamsRef.current;
       const activeM = teams[activeTeamIdx]?.members[activeMemberIdx];
 
-      if (activeM && activeM.hp <= 0 && e.projectiles.length === 0 && e.explosions.length === 0) {
+      if (activeM && activeM.hp <= 0 && e.projectiles.length === 0 && e.explosions.length === 0 && e.explosionPostTimer <= 0) {
         moveToNextPlayer();
         return;
       }
 
-      // --- PHYSICS & MOOD UPDATES ---
       teams.forEach(t => t.members.forEach((mem: Member) => {
         if (mem.hp <= 0) return;
-
-        // Mood cooldown logic
         if (mem.moodTimer > 0) {
           mem.moodTimer--;
           if (mem.moodTimer <= 0) mem.mood = 'default';
         }
-
         mem.vy += 0.25; 
         mem.y += mem.vy;
         const groundY = terrainHeightMap.current[Math.floor(mem.x)] || WATER_LINE;
@@ -191,7 +189,7 @@ export default function App() {
           mem.onGround = true; 
         } else { mem.onGround = false; }
 
-        if (mem === activeM && e.projectiles.length === 0 && e.explosions.length === 0) {
+        if (mem === activeM && e.projectiles.length === 0 && e.explosions.length === 0 && e.explosionPostTimer <= 0) {
             let nextX = mem.x;
             if (keys.current['KeyA']) nextX -= 3.5;
             if (keys.current['KeyD']) nextX += 3.5;
@@ -204,13 +202,12 @@ export default function App() {
         if (mem.y > WATER_LINE) mem.hp -= 1.0;
       }));
 
-      // --- CAMERA ---
       let targetX = e.scrollX;
       if (e.projectiles.length > 0) {
         targetX = e.projectiles[0].x - window.innerWidth / 2;
         isManualScroll.current = false;
         e.lastImpactPos = { x: e.projectiles[0].x };
-      } else if (e.explosions.length > 0 && e.lastImpactPos) {
+      } else if ((e.explosions.length > 0 || e.explosionPostTimer > 0) && e.lastImpactPos) {
         targetX = e.lastImpactPos.x - window.innerWidth / 2;
       } else if (activeM) {
         const left = keys.current['ArrowLeft'];
@@ -227,7 +224,6 @@ export default function App() {
       e.scrollX += (targetX - e.scrollX) * (e.projectiles.length > 0 ? 0.15 : 0.08);
       e.scrollX = Math.max(0, Math.min(MAP_WIDTH - window.innerWidth, e.scrollX));
 
-      // --- PROJECTILES ---
       e.projectiles.forEach((p, i) => {
         if (p.fuel > 0) {
             const speed = Math.hypot(p.vx, p.vy);
@@ -254,12 +250,16 @@ export default function App() {
       });
 
       if (e.isWaitingForExplosion && e.projectiles.length === 0 && e.explosions.length === 0) {
+        if (e.explosionPostTimer > 0) {
+          e.explosionPostTimer--;
+        } else {
           e.isWaitingForExplosion = false;
           e.lastImpactPos = null;
           moveToNextPlayer();
+        }
       }
 
-      if (activeM && e.projectiles.length === 0 && e.explosions.length === 0 && activeM.hp > 0) {
+      if (activeM && e.projectiles.length === 0 && e.explosions.length === 0 && e.explosionPostTimer <= 0 && activeM.hp > 0) {
         if (keys.current['ArrowUp']) e.angle -= 2;
         if (keys.current['ArrowDown']) e.angle += 2;
         const teamAmmo = teams[activeTeamIdx].teamAmmo;
@@ -289,10 +289,6 @@ export default function App() {
       const team = teamsRef.current[activeTeamIdx];
       const wpn = team.teamAmmo[currentWpn];
 
-      // Set happy mood for firing
-      m.mood = 'happy';
-      m.moodTimer = 120; 
-
       const rad = e.angle * Math.PI / 180;
       const ratio = e.charge / 100;
       
@@ -308,13 +304,17 @@ export default function App() {
       e.isCharging = false; 
       e.charge = 0;
       e.isWaitingForExplosion = true;
+      e.explosionPostTimer = 0; 
     };
 
     const explode = (x: number, y: number, proj: Projectile) => {
       const e = engine.current;
       const effect = applySpecialImpacts(proj, teamsRef.current, e.floatingTexts);
-      
-      teamsRef.current.forEach(t => t.members.forEach((mem: Member) => {
+      e.explosionPostTimer = 90;
+
+      const attacker = teamsRef.current[proj.ownerIndex]?.members[activeMemberIdx];
+
+      teamsRef.current.forEach((t, tIdx) => t.members.forEach((mem: Member) => {
         if (mem.hp <= 0) return;
         const d = Math.hypot(mem.x - x, mem.y - (mem.y - mem.radius/2));
         if (d < effect.radius + mem.radius) {
@@ -324,8 +324,13 @@ export default function App() {
           mem.hp -= dmg; 
           mem.vy -= 4 * damageMult; 
 
-          // Set sad mood when hit
           if (dmg > 5) {
+            // If target is an enemy, make the attacker happy
+            if (tIdx !== proj.ownerIndex && attacker) {
+              attacker.mood = 'happy';
+              attacker.moodTimer = 120;
+            }
+            // Target is always sad when taking significant damage
             mem.mood = 'sad';
             mem.moodTimer = 180;
           }
@@ -376,7 +381,7 @@ export default function App() {
         ctx.fillStyle = m.hp > 50 ? '#22c55e' : (m.hp > 25 ? '#eab308' : '#ef4444');
         ctx.fillRect(m.x - 20, m.y - 55, (Math.max(0, m.hp)/100)*40, 5);
 
-        if (isActive && e.projectiles.length === 0 && e.explosions.length === 0) {
+        if (isActive && e.projectiles.length === 0 && e.explosions.length === 0 && e.explosionPostTimer <= 0) {
           ctx.setLineDash([8, 8]); ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)'; ctx.lineWidth = 4; ctx.beginPath();
           const rad = e.angle * Math.PI / 180;
           ctx.moveTo(m.x, m.y - m.radius - 10); ctx.lineTo(m.x + Math.cos(rad)*150, (m.y-m.radius-10) + Math.sin(rad)*150);
