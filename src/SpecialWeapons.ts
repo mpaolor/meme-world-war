@@ -1,89 +1,57 @@
-import { FloatingText, Interception, Member, Projectile, Team } from './types';
+import { FloatingText, Interception, Projectile, Team } from './types';
 
-export const updateDrones = (projectiles: Projectile[], teams: Team[], activeTeamIdx: number) => {
-  const TURN_SPEED = 0.08;
-  const SPEED = 4;
-  
-  projectiles.forEach(p => {
-    if (p.type !== 'drone') return;
-    let nearestEnemy: Member | null = null;
-    let minDist = Infinity;
+type PhysicsProjectile = Projectile & { fuel: number, thrustPower: number, launchSafeTimer: number };
 
-    teams.forEach((team, tIdx) => {
-      if (tIdx === p.ownerIndex) return;
-      team.members.forEach(m => {
-        if (m.hp <= 0) return;
-        const d = Math.hypot(m.x - p.x, m.y - p.y);
-        if (d < minDist) { minDist = d; nearestEnemy = m; }
-      });
-    });
+export const applySpecialImpacts = (
+  proj: Projectile, 
+  teams: Team[], 
+  texts: FloatingText[]
+): { radius: number; damage: number; color: string } => {
+  const type = proj.type;
+  let effect = { radius: 75, damage: 45, color: '#ff4500' };
 
-    if (nearestEnemy) {
-      const target: Member = nearestEnemy;
-      const targetAngle = Math.atan2(target.y - p.y, target.x - p.x);
-      const currentAngle = Math.atan2(p.vy, p.vx);
-      const newAngle = currentAngle + (targetAngle - currentAngle) * TURN_SPEED;
-      p.vx = Math.cos(newAngle) * SPEED;
-      p.vy = Math.sin(newAngle) * SPEED;
+  switch (type) {
+    case 'tweet_storm': effect = { radius: 110, damage: 30, color: '#1DA1F2' }; break;
+    case 'trade_war': effect = { radius: 100, damage: 55, color: '#85bb65' }; break;
+    case 'gas': effect = { radius: 140, damage: 20, color: '#32CD32' }; break;
+    case 'frozen':
+      effect = { radius: 90, damage: 15, color: '#00FFFF' };
+      teams.forEach(t => t.members.forEach(m => {
+        if (Math.hypot(m.x - proj.x, m.y - proj.y) < 100) m.frozenTurns = 2;
+      }));
+      break;
+    case 'centrifuge': effect = { radius: 200, damage: 90, color: '#FFFF00' }; break;
+    case 'supreme': effect = { radius: 120, damage: 65, color: '#ed1c24' }; break;
+    case 'drone': effect = { radius: 95, damage: 50, color: '#ffffff' }; break;
+    default: break;
+  }
+  return effect;
+};
+
+export const updateDrones = (
+  projectiles: PhysicsProjectile[], 
+  teams: Team[], 
+  activeTeamIdx: number,
+  interceptions: Interception[]
+) => {
+  projectiles.forEach((p, pIdx) => {
+    if (p.type === 'drone') {
+      const enemyTeams = teams.filter((_, i) => i !== activeTeamIdx);
+      let closestEnemy: any = null;
+      let minDist = 1500;
+      enemyTeams.forEach(t => t.members.forEach(m => {
+        if (m.hp > 0) {
+          const d = Math.hypot(m.x - p.x, m.y - p.y);
+          if (d < minDist) { minDist = d; closestEnemy = m; }
+        }
+      }));
+      if (closestEnemy) {
+        const angle = Math.atan2(closestEnemy.y - p.y, closestEnemy.x - p.x);
+        p.vx += Math.cos(angle) * 0.4;
+        p.vy += Math.sin(angle) * 0.4;
+        const speed = Math.hypot(p.vx, p.vy);
+        if (speed > 9) { p.vx *= (9/speed); p.vy *= (9/speed); }
+      }
     }
   });
-};
-
-// NEW: Added color identifiers to differentiate the blast visuals
-export const applySpecialImpacts = (p: Projectile, teams: Team[], texts: FloatingText[]) => {
-  const x = p.x; const y = p.y;
-
-  if (p.type === 'supreme') {
-    return { radius: 120, damage: 60, color: '#FF4500' }; // Massive Orange Nuke
-  }
-
-  if (p.type === 'parade') {
-    teams.forEach(t => t.members.forEach(m => {
-      if (Math.abs(m.x - x) < 150) {
-        m.vy += 12; // Massive downward shockwave
-        texts.push({x: m.x, y: m.y - 50, text: "STOMPED!", color: "#8B4513", life: 40});
-      }
-    }));
-    return { radius: 60, damage: 40, color: '#8B4513' }; // Brown Shockwave
-  }
-
-  if (p.type === 'drone') {
-    return { radius: 45, damage: 30, color: '#FFD700' }; // Yellow/Electric
-  }
-
-  if (p.type === 'centrifuge') {
-    return { radius: 80, damage: 50, color: '#32CD32' }; // Toxic Green
-  }
-  
-  if (p.type === 'gas') {
-    return { radius: 40, damage: 15, color: '#2E8B57' }; // Spawns cloud in App.tsx
-  }
-
-  if (p.type === 'frozen') {
-    return { radius: 60, damage: 20, color: '#00FFFF' }; // Cyan Freeze
-  }
-
-  return { radius: 50, damage: 35, color: '#FFA500' }; // Default Orange Standard
-};
-
-export const processIronDome = (m: Member, projectiles: Projectile[], interceptions: Interception[]) => {
-  if (!m.isIronDomeActive || m.ironDomeBattery <= 0) return;
-  const DOME_RADIUS = 150;
-  for (let i = projectiles.length - 1; i >= 0; i--) {
-    const p = projectiles[i];
-    if (p.ownerIndex === -1) continue;
-    if (Math.hypot(p.x - m.x, p.y - m.y) < DOME_RADIUS) {
-      interceptions.push({ x: p.x, y: p.y, life: 25 });
-      projectiles.splice(i, 1);
-      m.ironDomeBattery--;
-      if (m.ironDomeBattery <= 0) m.isIronDomeActive = false;
-    }
-  }
-};
-
-export const drawSpecialVisuals = (ctx: CanvasRenderingContext2D, m: Member) => {
-  if (m.isIronDomeActive) {
-    ctx.save(); ctx.beginPath(); ctx.arc(m.x, m.y, 150, 0, Math.PI * 2);
-    ctx.strokeStyle = 'cyan'; ctx.setLineDash([5, 15]); ctx.stroke(); ctx.restore();
-  }
 };
