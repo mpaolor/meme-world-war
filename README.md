@@ -1,4 +1,4 @@
-# 🌍 Geopolitical Wars: Tactical Artillery
+# 🌍 Meme World War: Tactical Artillery
 
 A turn-based artillery game built with React, TypeScript, and Canvas.
 

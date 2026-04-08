@@ -26,7 +26,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onStart }) => {
       color:'white', minHeight:'100vh', padding:'40px', fontFamily: 'Courier New' 
     }}>
       <h1 style={{ fontSize: '3.5rem', color: '#f87171', textShadow: '0 0 20px rgba(248,113,113,0.4)', margin: '0 0 10px 0' }}>
-        GEOPOLITICAL WARS
+        MEME WORLD WAR
       </h1>
       <p style={{ color: '#94a3b8', marginBottom: '30px', letterSpacing: '2px' }}>[ STRATEGIC COMMAND INTERFACE ]</p>
       
