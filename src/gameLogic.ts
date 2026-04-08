@@ -1,4 +1,4 @@
-import { Member } from './types';
+import type { Member } from './types';
 
 export const GRAVITY = 0.22;
 export const WATER_LEVEL = 540;
@@ -28,7 +28,7 @@ export const drawLeader = (ctx: CanvasRenderingContext2D, m: Member, leader: str
 
   if (!imageCache[imageName]) {
     const img = new Image();
-    img.src = `/images/${imageName}.png`;
+    img.src = `./images/${imageName}.png`;
     imageCache[imageName] = img;
   }
 

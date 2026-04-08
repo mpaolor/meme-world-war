@@ -1,6 +1,6 @@
-import { Explosion, FloatingText, Interception, Member, Projectile, Team, WeaponType } from './types';
-import React, { useEffect, useRef, useState } from 'react';
+import type { Explosion, FloatingText, Interception, Member, Projectile, Team, WeaponType } from './types';
 import { applySpecialImpacts, updateDrones } from './SpecialWeapons';
+import { useEffect, useRef, useState } from 'react';
 
 import { MainMenu } from './MainMenu';
 import { drawLeader } from './gameLogic';
