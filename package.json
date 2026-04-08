@@ -1,5 +1,6 @@
 {
   "name": "world-war-game",
+  "homepage": "https://mpaolor.github.io/meme-world-war",
   "private": true,
   "version": "1.0.0",
   "type": "module",
